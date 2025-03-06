@@ -50,6 +50,7 @@ func (s Server) Run() int {
 	mux.HandleFunc("GET /items", h.GetItems)
 	mux.HandleFunc("GET /items/{item_id}", h.GetItem)
 	mux.HandleFunc("GET /images/{filename}", h.GetImage)
+	mux.HandleFunc("GET /search", h.SearchItems)
 
 	// start the server
 	slog.Info("http server started on", "port", s.Port)
@@ -88,7 +89,12 @@ type AddItemRequest struct {
 	Image    []byte `form:"image"`    // STEP 4-4: add an image field
 }
 
+type SearchItemRequest struct {
+	Keyword string
+}
+
 type ItemResponse struct {
+	ID        int    `json:"id"`
 	Name      string `json:"name"`
 	Category  string `json:"category"`   // STEP 4-2: add a category field
 	ImageName string `json:"image_name"` // STEP 4-4: add an image field
@@ -100,6 +106,7 @@ type ItemsResponse struct {
 
 func itemToItemResponse(item *Item) ItemResponse {
 	return ItemResponse{
+		ID:        item.ID,
 		Name:      item.Name,
 		Category:  item.Category,
 		ImageName: item.ImageName,
@@ -151,11 +158,7 @@ func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
 	}
 	resItems := make([]ItemResponse, len(items))
 	for i, item := range items {
-		resItems[i] = ItemResponse{
-			Name:      item.Name,
-			Category:  item.Category,
-			ImageName: item.ImageName, // STEP 4-4: add an image field
-		}
+		resItems[i] = itemToItemResponse(item)
 	}
 	resp := ItemsResponse{Items: resItems}
 	err = json.NewEncoder(w).Encode(resp)
@@ -174,18 +177,14 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	items, err := s.itemRepo.SelectAll(ctx)
+	item, err := s.itemRepo.GetItem(ctx, req.ItemID)
 	if err != nil {
 		slog.Error("failed to get item ", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if items == nil || len(items) <= req.ItemID {
-		slog.Error("item not found ", "error", err)
-		http.Error(w, "no item found", http.StatusNotFound)
-		return
-	}
-	resp := itemToItemResponse(items[req.ItemID])
+
+	resp := itemToItemResponse(item)
 	err = json.NewEncoder(w).Encode(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -235,6 +234,37 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+func parseSearchItemsRequest(r *http.Request) (*SearchItemRequest, error) {
+	keyword := r.URL.Query().Get("keyword")
+	req := &SearchItemRequest{
+		Keyword: keyword,
+	}
+	return req, nil
+}
+
+func (s *Handlers) SearchItems(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	req, err := parseSearchItemsRequest(r)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	items, err := s.itemRepo.SearchFromName(ctx, req.Keyword)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resItems := make([]ItemResponse, len(items))
+	for i, item := range items {
+		resItems[i] = itemToItemResponse(item)
+	}
+	resp := ItemsResponse{Items: resItems}
+	err = json.NewEncoder(w).Encode(resp)
 }
 
 // storeImage stores an image and returns the file path and an error if any.
