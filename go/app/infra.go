@@ -2,13 +2,21 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	// STEP 5-1: uncomment this line
-	// _ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
+)
+
+const (
+	// it's flag to switch between JSON and DB implementation.
+	// please set it to false to use JSON implementation.
+	// trainee don't need to implement this flag.
+	useDB = true
 )
 
 var errImageNotFound = errors.New("image not found")
@@ -32,38 +40,115 @@ type Item struct {
 type ItemRepository interface {
 	Insert(ctx context.Context, item *Item) error
 	SelectAll(ctx context.Context) ([]*Item, error)
+	GetItem(ctx context.Context, id int) (*Item, error)
+	SearchFromName(ctx context.Context, name string) ([]*Item, error)
 }
 
 // itemRepository is an implementation of ItemRepository
 type itemRepository struct {
+	db *sql.DB
 	// fileName is the path to the JSON file storing items.
 	fileName string
 }
 
 // NewItemRepository creates a new itemRepository.
 func NewItemRepository() ItemRepository {
-	return &itemRepository{fileName: "items.json"}
+	db, err := sql.Open("sqlite3", "./db/mercari.sqlite3")
+	if err != nil {
+		log.Fatal(err)
+	}
+	// TODO: How should I close db ...
+	return &itemRepository{
+		db:       db,
+		fileName: "items.json",
+	}
 }
 
 // Insert inserts an item into the repository.
 func (i *itemRepository) Insert(ctx context.Context, item *Item) error {
-	// Added this to leave the code for the JSON implementation.
-	if i.fileName != "" {
+	if !useDB {
 		return i.insertToFile(ctx, item)
 	}
 
-	return fmt.Errorf("SelectAll is not implemented")
+	_, err := i.db.Exec(
+		"INSERT INTO item (name, category, image_name) VALUES (?, ?, ?)",
+		item.Name, item.Category, item.ImageName,
+	)
+	return err
+}
+
+func (i *itemRepository) GetItem(ctx context.Context, id int) (*Item, error) {
+	if !useDB {
+		items, err := i.SelectAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if items == nil || len(items) <= id {
+			return nil, err
+		}
+		return items[id], nil
+	}
+
+	var item Item
+	err := i.db.QueryRow("SELECT id, name, category, image_name FROM item WHERE id = ?", id).Scan(&item.ID, &item.Name, &item.Category, &item.ImageName)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 // Insert inserts an item into the repository.
 func (i *itemRepository) SelectAll(ctx context.Context) ([]*Item, error) {
 	// Added this to leave the code for the JSON implementation.
-	if i.fileName != "" {
+
+	if !useDB {
 		items, err := i.getItemsFromFile(ctx)
 		return items, err
 	}
 
-	return nil, fmt.Errorf("SelectAll is not implemented")
+	rows, err := i.db.Query("SELECT id, name, category, image_name FROM item")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+	items := []*Item{}
+	for rows.Next() {
+		var item Item
+		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.ImageName); err != nil {
+			log.Fatal(err)
+		}
+		items = append(items, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (i *itemRepository) SearchFromName(ctx context.Context, name string) ([]*Item, error) {
+	if !useDB {
+		return nil, errors.New("not implemented")
+	}
+
+	rows, err := i.db.Query("SELECT id, name, category, image_name FROM item where name like ?", "%"+name+"%")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+	items := []*Item{}
+	for rows.Next() {
+		var item Item
+		if err := rows.Scan(&item.ID, &item.Name, &item.Category, &item.ImageName); err != nil {
+			log.Fatal(err)
+		}
+		items = append(items, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
 }
 
 func (i *itemRepository) getItemsFromFile(ctx context.Context) ([]*Item, error) {
