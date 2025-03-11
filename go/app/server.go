@@ -40,7 +40,9 @@ func (s Server) Run() int {
 	// STEP 5-1: set up the database connection
 
 	// set up handlers
-	itemRepo := NewItemRepository()
+	db := GetDB()
+	defer db.Close()
+	itemRepo := NewItemRepository(db)
 	h := &Handlers{imgDirPath: s.ImageDirPath, itemRepo: itemRepo}
 
 	// set up routes
@@ -50,6 +52,7 @@ func (s Server) Run() int {
 	mux.HandleFunc("GET /items", h.GetItems)
 	mux.HandleFunc("GET /items/{item_id}", h.GetItem)
 	mux.HandleFunc("GET /images/{filename}", h.GetImage)
+	mux.HandleFunc("GET /search", h.SearchItems)
 
 	// start the server
 	slog.Info("http server started on", "port", s.Port)
@@ -88,7 +91,12 @@ type AddItemRequest struct {
 	Image    []byte `form:"image"`    // STEP 4-4: add an image field
 }
 
+type SearchItemRequest struct {
+	Keyword string
+}
+
 type ItemResponse struct {
+	ID        int    `json:"id"`
 	Name      string `json:"name"`
 	Category  string `json:"category"`   // STEP 4-2: add a category field
 	ImageName string `json:"image_name"` // STEP 4-4: add an image field
@@ -100,6 +108,7 @@ type ItemsResponse struct {
 
 func itemToItemResponse(item *Item) ItemResponse {
 	return ItemResponse{
+		ID:        item.ID,
 		Name:      item.Name,
 		Category:  item.Category,
 		ImageName: item.ImageName,
@@ -116,15 +125,14 @@ func parseAddItemRequest(r *http.Request) (*AddItemRequest, error) {
 
 	// STEP 4-4: add an image field
 	f, _, err := r.FormFile("image")
-	if err != nil {
-		return nil, errors.New("Failed to read form file")
+	if err == nil && f != nil {
+		defer f.Close()
+		b, err := io.ReadAll(f)
+		if err != nil {
+			return nil, errors.New("Failed to read image data")
+		}
+		req.Image = b
 	}
-	defer f.Close()
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return nil, errors.New("Failed to read image data")
-	}
-	req.Image = b
 
 	// validate the request
 	if req.Name == "" {
@@ -151,11 +159,7 @@ func (s *Handlers) GetItems(w http.ResponseWriter, r *http.Request) {
 	}
 	resItems := make([]ItemResponse, len(items))
 	for i, item := range items {
-		resItems[i] = ItemResponse{
-			Name:      item.Name,
-			Category:  item.Category,
-			ImageName: item.ImageName, // STEP 4-4: add an image field
-		}
+		resItems[i] = itemToItemResponse(item)
 	}
 	resp := ItemsResponse{Items: resItems}
 	err = json.NewEncoder(w).Encode(resp)
@@ -174,18 +178,14 @@ func (s *Handlers) GetItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	items, err := s.itemRepo.SelectAll(ctx)
+	item, err := s.itemRepo.GetItem(ctx, req.ItemID)
 	if err != nil {
 		slog.Error("failed to get item ", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if items == nil || len(items) <= req.ItemID {
-		slog.Error("item not found ", "error", err)
-		http.Error(w, "no item found", http.StatusNotFound)
-		return
-	}
-	resp := itemToItemResponse(items[req.ItemID])
+
+	resp := itemToItemResponse(item)
 	err = json.NewEncoder(w).Encode(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -202,19 +202,20 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	// STEP 4-4: uncomment on adding an implementation to store an image
-	fileName, err := s.storeImage(req.Image)
-	if err != nil {
-		slog.Error("failed to store image: ", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	item := &Item{
+		Name:     req.Name,
+		Category: req.Category,
 	}
 
-	item := &Item{
-		Name:      req.Name,
-		Category:  req.Category,
-		ImageName: fileName,
+	// STEP 4-4: uncomment on adding an implementation to store an image
+	if req.Image != nil {
+		fileName, err := s.storeImage(req.Image)
+		if err != nil {
+			slog.Error("failed to store image: ", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		item.ImageName = fileName
 	}
 
 	// STEP 4-2: add an implementation to store an item
@@ -235,6 +236,37 @@ func (s *Handlers) AddItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+func parseSearchItemsRequest(r *http.Request) (*SearchItemRequest, error) {
+	keyword := r.URL.Query().Get("keyword")
+	req := &SearchItemRequest{
+		Keyword: keyword,
+	}
+	return req, nil
+}
+
+func (s *Handlers) SearchItems(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	req, err := parseSearchItemsRequest(r)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	items, err := s.itemRepo.SearchFromName(ctx, req.Keyword)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resItems := make([]ItemResponse, len(items))
+	for i, item := range items {
+		resItems[i] = itemToItemResponse(item)
+	}
+	resp := ItemsResponse{Items: resItems}
+	err = json.NewEncoder(w).Encode(resp)
 }
 
 // storeImage stores an image and returns the file path and an error if any.
