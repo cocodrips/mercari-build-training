@@ -18,7 +18,7 @@ const (
 	// trainee don't need to implement this flag.
 	useDB      = true
 	dbPath     = "./db/mercari.sqlite3"
-	schemaFile = "./db/item.sql"
+	schemaFile = "./db/items.sql"
 )
 
 var errImageNotFound = errors.New("image not found")
