@@ -50,3 +50,7 @@ export const postItem = async (input: CreateItemInput): Promise<Response> => {
 
   return response;
 };
+
+export const ImageURL = (imageName: string): string => {
+  return `${SERVER_URL}/images/${imageName}`;
+}

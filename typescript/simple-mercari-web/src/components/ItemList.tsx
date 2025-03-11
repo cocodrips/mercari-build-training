@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Item, fetchItems } from '~/api';
+import {Item, fetchItems, ImageURL} from '~/api';
 
 const PLACEHOLDER_IMAGE = import.meta.env.VITE_FRONTEND_URL + '/logo192.png';
 
@@ -34,7 +34,7 @@ export const ItemList = ({ reload, onLoadCompleted }: Prop) => {
         return (
           <div key={item.id} className="ItemList">
             {/* TODO: Task 2: Show item images */}
-            <img src={PLACEHOLDER_IMAGE} />
+            <img src={ item.image_name != "" ? ImageURL(item.image_name) : PLACEHOLDER_IMAGE }/>
             <p>
               <span>Name: {item.name}</span>
               <br />
