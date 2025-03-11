@@ -4,6 +4,11 @@
   --margin: margin;
 }
 
+.Container {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
 .App {
   text-align: center;
 }
@@ -31,6 +36,8 @@
 }
 
 .ItemList {
+  margin: 10px;
+  padding: 10px;
   min-height: 8vh;
   display: flex;
   flex-direction: column;
@@ -40,6 +47,17 @@
   font-size: calc(10px + 1vmin);
   color: var(--text-color);
 }
+
+.ItemList > p {
+  width: 100%;
+
+}
+.ItemList > img {
+  border: 5px solid #ddd;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+}
+
 
 
 .App-link {
