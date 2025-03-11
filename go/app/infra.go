@@ -16,7 +16,9 @@ const (
 	// it's flag to switch between JSON and DB implementation.
 	// please set it to false to use JSON implementation.
 	// trainee don't need to implement this flag.
-	useDB = true
+	useDB      = true
+	dbPath     = "./db/mercari.sqlite3"
+	schemaFile = "./db/items.sql"
 )
 
 var errImageNotFound = errors.New("image not found")
@@ -51,13 +53,51 @@ type itemRepository struct {
 	fileName string
 }
 
-// NewItemRepository creates a new itemRepository.
-func NewItemRepository() ItemRepository {
-	db, err := sql.Open("sqlite3", "./db/mercari.sqlite3")
+func initializeDB() error {
+	schema, err := os.ReadFile(schemaFile)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	// TODO: How should I close db ...
+	db, err := sql.Open("sqlite3", dbPath)
+	defer db.Close()
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(string(schema))
+	if err != nil {
+		log.Fatal("Failed to execute schema", err)
+		return err
+	}
+	return nil
+}
+
+func GetDB() *sql.DB {
+	if !useDB {
+		return nil
+	}
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		slog.Info("SQLite database does not exist, creating a new one...")
+		_, err := os.Create(dbPath)
+		if err != nil {
+			log.Fatal("Can't create db file", err)
+			return nil
+		}
+		err = initializeDB()
+		if err != nil {
+			log.Fatal("Failed to initialize db", err)
+			return nil
+		}
+	}
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatal("Failed to open sqlite3 file", err)
+		return nil
+	}
+	return db
+}
+
+// NewItemRepository creates a new itemRepository.
+func NewItemRepository(db *sql.DB) ItemRepository {
 	return &itemRepository{
 		db:       db,
 		fileName: "items.json",
