@@ -7,6 +7,7 @@ RUN npm ci
 COPY . .
 
 RUN addgroup -S mercari && adduser -S trainee -G mercari
+RUN chown -R trainee:mercari /app
 USER trainee
 
-CMD ["npm", "start"]
+CMD ["npm", "start", "--", "--host"]
